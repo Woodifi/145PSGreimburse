@@ -1,23 +1,95 @@
-title: 145 ACU PSG Expense System
-description: Parent Support Group Expense Request and Reimbursement System
+name: Deploy to GitHub Pages
 
-# Disable Jekyll processing — serve files as-is
-plugins: []
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
-# Ensure HTML files are served correctly
-include:
-  - index.html
-  - 404.html
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-# Exclude dev files
-exclude:
-  - README.md
-  - "*.sh"
-  - ".git"
-  - "node_modules"
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
-# No theme — pure HTML app
-theme: null
+jobs:
+  validate:
+    name: Validate application files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-# Ensure the root index.html is served
-permalink: pretty
+      - name: Verify required files exist
+        run: |
+          echo "Checking required files..."
+          test -f index.html && echo "✓ index.html found" || (echo "✗ index.html MISSING" && exit 1)
+          test -f 404.html && echo "✓ 404.html found" || (echo "✗ 404.html MISSING" && exit 1)
+          test -f .nojekyll && echo "✓ .nojekyll found" || (echo "✗ .nojekyll MISSING" && exit 1)
+
+      - name: Check Azure client ID is configured
+        run: |
+          if grep -q "YOUR_AZURE_APP_CLIENT_ID_HERE" index.html; then
+            echo "⚠ WARNING: Azure Client ID has not been configured in index.html"
+            echo "The app will deploy but sign-in will not work until you set your Client ID."
+          else
+            echo "✓ Azure Client ID appears to be configured"
+          fi
+
+      - name: Check admin emails are configured
+        run: |
+          if grep -q "psg.treasurer@yourdomain.com" index.html; then
+            echo "⚠ WARNING: Default admin emails are still in place — update adminEmails in CONFIG"
+          else
+            echo "✓ Admin emails appear to be customised"
+          fi
+
+      - name: File size check
+        run: |
+          SIZE=$(wc -c < index.html)
+          echo "index.html size: ${SIZE} bytes"
+          if [ $SIZE -lt 50000 ]; then
+            echo "⚠ WARNING: index.html seems very small — verify the file is complete"
+          else
+            echo "✓ File size looks correct"
+          fi
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Output deployment URL
+        run: |
+          echo ""
+          echo "════════════════════════════════════════════"
+          echo "✓ 145 ACU PSG Expense System deployed!"
+          echo "URL: ${{ steps.deployment.outputs.page_url }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Copy the URL above"
+          echo "2. Add it as a Redirect URI in your Azure App Registration"
+          echo "   (Azure Portal → App registrations → Authentication → SPA)"
+          echo "3. Update CONFIG.clientId in index.html with your Azure Client ID"
+          echo "════════════════════════════════════════════"

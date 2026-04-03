@@ -773,12 +773,12 @@ body{font-family:var(--sans);background:var(--paper);color:var(--ink);min-height
 //  CONFIG — EDIT BEFORE DEPLOYING
 // ════════════════════════════════
 const CONFIG = {
-  clientId: '8a731005-c3ae-47b3-9734-54c07a82a6eb',
+  clientId: 'YOUR_AZURE_APP_CLIENT_ID_HERE',
   dataFolder: '145ACU_PSG',
   dbFile: '145ACU_PSG/expense_db.json',
   settingsFile: '145ACU_PSG/settings.json',
   receiptsFolder: '145ACU_PSG/Receipts',
-  adminEmails: ['lisamic25@hotmail.com','admin@seanscales.com.au'],
+  adminEmails: ['psg.treasurer@yourdomain.com','psg.chair@yourdomain.com'],
   authority: 'https://login.microsoftonline.com/common'
 };
 
@@ -838,6 +838,10 @@ async function onSignedIn() {
   document.getElementById('signin-screen').style.display='none';
   document.getElementById('main-app').style.display='block';
   loadAllRequests();
+  // Audit log + OC pin check (inlined — no function patching)
+  await appendAuditEntry('User signed in','AUTH','Session started — session ID: '+window._sessionId, null);
+  const pinExists = await checkOcPinExists();
+  if(!pinExists){ document.getElementById('oc-setup-section').style.display='block'; }
 }
 
 async function graphCall(method,path,body,isUpload) {
@@ -859,6 +863,10 @@ async function ensureFolderStructure() {
   catch{await graphCall('POST','/me/drive/root:/'+CONFIG.dataFolder+':/children',{name:'Receipts',folder:{}, '@microsoft.graph.conflictBehavior':'replace'});}
   try{await graphCall('GET','/me/drive/root:/'+CONFIG.dbFile+':/');}catch{await writeDB([]);}
   try{await graphCall('GET','/me/drive/root:/'+CONFIG.settingsFile+':/');}catch{await writeSettings({psgEmail:'',psgEmail2:'',reminderDays:7});}
+  // Audit file init (inlined — no function patching)
+  try{await graphCall('GET','/me/drive/root:/'+AUDIT_FILE+':/');} catch{
+    await graphCall('PUT','/me/drive/root:/'+AUDIT_FILE+':/content',new Blob([JSON.stringify([],null,2)],{type:'application/json'}),true);
+  }
 }
 
 async function readDB(){const m=await graphCall('GET','/me/drive/root:/'+CONFIG.dbFile+':/');const r=await fetch(m['@microsoft.graph.downloadUrl']);return r.json();}
@@ -895,6 +903,7 @@ async function submitRequest(){
       }:null,files:fileNames,status:'Pending',psgNote:'',
       history:[{action:'Submitted',by:name,at:new Date().toISOString(),note:''}]};
     const db=await readDB();db.push(req);await writeDB(db);allRequests=db;
+    await appendAuditEntry('Expense request submitted','SUBMIT','New expense request submitted: '+id, id);
     updateBadges();toast('Request '+id+' submitted — PSG notified!','success');resetForm();goStep(1);
     const s=await readSettings();
     if(s.psgEmail){
@@ -913,6 +922,8 @@ async function updateRequestStatus(id,status,note){
     r.history.push({action:status,by:currentUser.name||currentUser.username,at:new Date().toISOString(),note:note||''});
     if(status==='Paid')r.paidAt=new Date().toISOString();
     await writeDB(db);allRequests=db;updateBadges();
+    await appendAuditEntry('Request status updated to '+status,'APPROVE','Status change for request '+id+' — note: '+(note||'none'), id);
+    if(status==='Paid') await appendAuditEntry('Payment authorised','PAYMENT','Payment recorded for request '+id, id);
     toast('Request '+id+' — '+status,'success');closeModal();renderAdminDashboard();
   }catch(e){toast('Error updating: '+e.message,'danger');}
 }
@@ -1063,7 +1074,9 @@ async function sendReminder(id){
 
 async function saveSettings(){
   const s={psgEmail:document.getElementById('psg-email').value,psgEmail2:document.getElementById('psg-email2').value,reminderDays:parseInt(document.getElementById('reminder-days').value)};
-  await writeSettings(s);toast('Settings saved to OneDrive.','success');
+  await writeSettings(s);
+  await appendAuditEntry('Notification settings updated','SETTINGS','PSG email and reminder settings modified', null);
+  toast('Settings saved to OneDrive.','success');
 }
 
 function updateBadges(){
@@ -1118,6 +1131,7 @@ function exportCSV(){
   const rows=allRequests.map(r=>[r.id,new Date(r.submittedAt).toLocaleDateString('en-AU'),r.name,r.email,r.category,r.amount.toFixed(2),r.status,'"'+(r.description||'').replace(/"/g,'""')+'"',r.paymentMethod,(r.files||[]).join(';'),'"'+(r.psgNote||'').replace(/"/g,'""')+'"']);
   const csv=[h,...rows].map(r=>r.join(',')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='145ACU_PSG_Expenses_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  appendAuditEntry('Data export — full CSV','REPORT','All expense records exported to CSV', null);
   toast('CSV exported.','success');
 }
 
@@ -1177,29 +1191,12 @@ async function appendAuditEntry(action, category, detail, targetId){
   }catch(e){ console.warn('Audit write failed:',e.message); }
 }
 
-// Patch core functions to emit audit events
-const _origSubmit = submitRequest;
-const _origUpdateStatus = updateRequestStatus;
-const _origSaveSettings = saveSettings;
-const _origExportCSV = exportCSV;
+// ════════════════════════════════
+//  SESSION ID
+// ════════════════════════════════
+window._sessionId = 'SES-'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
 
-async function submitRequest(){
-  await _origSubmit();
-  await appendAuditEntry('Expense request submitted','SUBMIT','New expense request submitted via form', null);
-}
-async function updateRequestStatus(id,status,note){
-  await _origUpdateStatus(id,status,note);
-  await appendAuditEntry('Request status updated to '+status,'APPROVE','Status change for request '+id+' — note: '+(note||'none'), id);
-  if(status==='Paid') await appendAuditEntry('Payment authorised','PAYMENT','Payment recorded for request '+id, id);
-}
-async function saveSettings(){
-  await _origSaveSettings();
-  await appendAuditEntry('Notification settings updated','SETTINGS','PSG email and reminder settings modified', null);
-}
-function exportCSV(){
-  _origExportCSV();
-  appendAuditEntry('Data export — full CSV','REPORT','All expense records exported to CSV', null);
-}
+window.addEventListener('load',initAuth);
 
 async function loadAuditLog(){
   document.getElementById('audit-list').innerHTML='<div class="ls"><div class="spin"></div><p>Loading…</p></div>';
@@ -1677,27 +1674,9 @@ async function exportReportCSV(type){
 }
 
 // ════════════════════════════════
-//  SESSION ID + ENSUREAUDITFILE
+//  SESSION ID
 // ════════════════════════════════
 window._sessionId = 'SES-'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
-
-const _origEnsureFolder = ensureFolderStructure;
-async function ensureFolderStructure(){
-  await _origEnsureFolder();
-  try{await graphCall('GET','/me/drive/root:/'+AUDIT_FILE+':/');} catch{
-    await graphCall('PUT','/me/drive/root:/'+AUDIT_FILE+':/content',new Blob([JSON.stringify([],null,2)],{type:'application/json'}),true);
-  }
-}
-
-const _origOnSignedIn = onSignedIn;
-async function onSignedIn(){
-  await _origOnSignedIn();
-  await appendAuditEntry('User signed in','AUTH','Session started — session ID: '+window._sessionId, null);
-  const pinExists = await checkOcPinExists();
-  if(!pinExists){
-    document.getElementById('oc-setup-section').style.display='block';
-  }
-}
 
 window.addEventListener('load',initAuth);
 </script>
