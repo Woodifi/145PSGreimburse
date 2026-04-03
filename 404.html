@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>145 ACU PSG — Redirecting…</title>
+<script>
+// GitHub Pages SPA redirect — preserves path for MSAL auth redirect
+var l = window.location;
+var path = l.pathname.slice(1);
+var search = l.search ? l.search.slice(1) : '';
+var hash = l.hash ? l.hash.slice(1) : '';
+var redirectUrl = l.origin + '/?p=' + encodeURIComponent(path) + (search ? '&q=' + encodeURIComponent(search) : '') + (hash ? '&h=' + encodeURIComponent(hash) : '');
+l.replace(redirectUrl);
+</script>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f7f6f3;color:#3a3d4a;}</style>
+</head>
+<body><p>Redirecting…</p></body>
+</html>

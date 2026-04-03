@@ -1,0 +1,23 @@
+title: 145 ACU PSG Expense System
+description: Parent Support Group Expense Request and Reimbursement System
+
+# Disable Jekyll processing — serve files as-is
+plugins: []
+
+# Ensure HTML files are served correctly
+include:
+  - index.html
+  - 404.html
+
+# Exclude dev files
+exclude:
+  - README.md
+  - "*.sh"
+  - ".git"
+  - "node_modules"
+
+# No theme — pure HTML app
+theme: null
+
+# Ensure the root index.html is served
+permalink: pretty
